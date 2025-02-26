@@ -16,14 +16,14 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 DB_PATH = "movies.db"
 q = " "
-semantic_model = SentenceTransformer("all-MiniLM-L12-v2")
+semantic_model = SentenceTransformer("sberbank-ai/sbert_large_nlu_ru")
 
 context = ContexManager()
 user_router = Router()
 
+USER_PATH = "user.db"
 
 
-#Храним состояние генерации в FSM контексте
 async def set_processing(state: FSMContext, is_processing: bool):
     await state.update_data(is_processing=is_processing)
 
@@ -58,6 +58,11 @@ async def cmd_next(message: types.Message):
     await message.answer("Вот, что я умею ",
                          reply_markup=main_inlines_kb)
 
+@user_router.message(F.text == "/menu")
+async def cmd_next(message: types.Message):
+    await message.answer("Вот, что я умею ",
+                         reply_markup=main_inlines_kb)
+
 
 @user_router.message(F.text == "Вернуться в меню")
 async def cmd_next(message: types.Message):
@@ -68,7 +73,7 @@ async def cmd_next(message: types.Message):
 
 @user_router.callback_query(F.data == "lib")
 async def cmd_zanatie(callback: types.CallbackQuery):
-    await callback.message.answer("На какую букву начинается тег?",
+    await callback.message.answer("Вот, что у меня есть",
                          reply_markup=lib)
 
 @user_router.callback_query(F.data == "genre")
@@ -164,7 +169,6 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
     kek = await callback.message.answer("Подождите немного...", reply_markup=lol_button_kb)
     timer_message = await callback.message.answer("⏳")
 
-    # Сброс переменной q в контексте
     await state.update_data(q=" ")
 
     await callback.bot.delete_message(chat_id=callback.from_user.id, message_id=timer_message.message_id)
@@ -172,8 +176,6 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
 
     await callback.message.answer("<i>Рекомендации успешно сброшены</i>",
                                   reply_markup=main_inlines_kb, parse_mode='HTML')
-
-
 
 
 def description(query):
@@ -196,12 +198,15 @@ def description(query):
             continue
         norm_q = np.linalg.norm(query_embedding)
         norm_m = np.linalg.norm(movie_embedding)
+
         similarity = np.dot(query_embedding, movie_embedding) / (norm_q * norm_m) if norm_q and norm_m else 0
 
         results.append((title, genre, year, about, rating, similarity))
 
     results.sort(key=lambda x: x[5], reverse=True)
     return [(title, genre, year, about, rating) for title, genre, year, about, rating, _ in results[:3]]
+
+
 
 def tag(query):
     """
@@ -259,7 +264,7 @@ async def process_movie(message: types.Message, state: FSMContext):
             await state.update_data(q="")
 
         data = await state.get_data()
-        q = data.get("q", "") + ", " + about1 + ", " + genre1
+        q = data.get("q", "") + ", " + genre1
         await state.update_data(q=q)
         await callback.message.answer(
             "<i>Изменения успешно сохранены</i>",
@@ -267,20 +272,6 @@ async def process_movie(message: types.Message, state: FSMContext):
             parse_mode='HTML'
         )
 
-        @user_router.callback_query(F.data == "ar1")
-        async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-            data = await state.get_data()
-            if "q" not in data:
-                await state.update_data(q="")
-
-            data = await state.get_data()
-            q = data.get("q", "") + ", " + about1 + + ", " + genre1
-            await state.update_data(q=q)
-            await callback.message.answer(
-                "<i>Изменения успешно сохранены</i>",
-                reply_markup=main_inlines_kb,
-                parse_mode='HTML'
-            )
 
     @user_router.callback_query(F.data.startswith("rate1"))
     async def rate_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -295,7 +286,7 @@ async def process_movie(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
 
         # Обновляем значение столбца "watched" для выбранного фильма
-        cursor.execute("UPDATE movies SET watched = 1 WHERE title = ?", (title,))
+        cursor.execute("UPDATE user SET watched = 1 WHERE title = ?", (title,))
         conn.commit()
         conn.close()
 
@@ -305,9 +296,9 @@ async def process_movie(message: types.Message, state: FSMContext):
     title2, genre2, year2, about2, rating2 = results[1]
     response2 = f"🎬 <b>{title2}</b>\n⭐ {rating2}\n📌 {genre2}\n📖 {about2}"
     keyboard2 = InlineKeyboardBuilder()
-    keyboard2.button(text="➕ В рекомендации", callback_data=f"add_rec:{title2}")
-    keyboard2.button(text="✅ Просмотрено", callback_data=f"watched:{title2}")
-    keyboard2.button(text="⭐ Оценить", callback_data=f"rate:{title2}")
+    keyboard2.button(text="➕ В рекомендации", callback_data=f"ar2")
+    keyboard2.button(text="✅ Просмотрено", callback_data=f"w2")
+    keyboard2.button(text="⭐ Оценить", callback_data=f"rate2")
     keyboard2.adjust(1)
     await message.answer(response2, parse_mode="HTML", reply_markup=keyboard2.as_markup())
 
@@ -318,7 +309,7 @@ async def process_movie(message: types.Message, state: FSMContext):
             await state.update_data(q="")
 
         data = await state.get_data()
-        q = data.get("q", "") + ", " + about2 + ", " + genre2
+        q = data.get("q", "") + ", " + genre2
         await state.update_data(q=q)
         await callback.message.answer(
             "<i>Изменения успешно сохранены</i>",
@@ -339,7 +330,7 @@ async def process_movie(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
 
         # Обновляем значение столбца "watched" для выбранного фильма
-        cursor.execute("UPDATE movies SET watched = 1 WHERE title = ?", (title,))
+        cursor.execute("UPDATE user SET watched = 1 WHERE title = ?", (title,))
         conn.commit()
         conn.close()
 
@@ -349,9 +340,9 @@ async def process_movie(message: types.Message, state: FSMContext):
     title3, genre3, year3, about3, rating3 = results[2]
     response3 = f"🎬 <b>{title3}</b>\n⭐ {rating3}\n📌 {genre3}\n📖 {about3}"
     keyboard3 = InlineKeyboardBuilder()
-    keyboard3.button(text="➕ В рекомендации", callback_data=f"add_rec:{title3}")
-    keyboard3.button(text="✅ Просмотрено", callback_data=f"watched:{title3}")
-    keyboard3.button(text="⭐ Оценить", callback_data=f"rate:{title3}")
+    keyboard3.button(text="➕ В рекомендации", callback_data=f"ar3")
+    keyboard3.button(text="✅ Просмотрено", callback_data=f"w3")
+    keyboard3.button(text="⭐ Оценить", callback_data=f"rate3")
     keyboard3.adjust(1)
     await message.answer(response3, parse_mode="HTML", reply_markup=keyboard3.as_markup())
 
@@ -362,7 +353,7 @@ async def process_movie(message: types.Message, state: FSMContext):
             await state.update_data(q="")
 
         data = await state.get_data()
-        q = data.get("q", "") + ", " + about3 + ", " + genre3
+        q = data.get("q", "") + ", " + genre3
         await state.update_data(q=q)
         await callback.message.answer(
             "<i>Изменения успешно сохранены</i>",
@@ -383,7 +374,7 @@ async def process_movie(message: types.Message, state: FSMContext):
         cursor = conn.cursor()
 
         # Обновляем значение столбца "watched" для выбранного фильма
-        cursor.execute("UPDATE movies SET watched = 1 WHERE title = ?", (title,))
+        cursor.execute("UPDATE user SET watched = 1 WHERE title = ?", (title,))
         conn.commit()
         conn.close()
 
@@ -402,7 +393,7 @@ async def save_rating(message: types.Message, state: FSMContext):
         if 1 <= rating <= 10:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("UPDATE movies SET mark = ? WHERE title = ?", (rating, title))
+            cursor.execute("UPDATE user SET mark = ? WHERE title = ?", (rating, title))
             conn.commit()
             conn.close()
             await message.answer(f"Вы поставили фильму '{title}' оценку {rating}/10")
