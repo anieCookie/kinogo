@@ -3,10 +3,9 @@ from aiogram import types
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ChatAction
-from Keyboards import main_inlines_kb, lib, tags, recommend, first_button_kb, lol_button_kb
+from Keyboards import main_inlines_kb, lib, tags, recommend, first_button_kb
 from ai_generators import generate
 from aiogram.fsm.state import State, StatesGroup
-from context import ContexManager
 from sentence_transformers import SentenceTransformer
 import sqlite3
 import os
@@ -15,13 +14,15 @@ import numpy as np
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 DB_PATH = "movies.db"
+USER_PATH = "user.db"
+
 q = " "
+
 semantic_model = SentenceTransformer("sberbank-ai/sbert_large_nlu_ru")
 
-context = ContexManager()
 user_router = Router()
 
-USER_PATH = "user.db"
+
 
 
 async def set_processing(state: FSMContext, is_processing: bool):
@@ -38,12 +39,6 @@ class Work(StatesGroup):
 
 
 
-#База
-@user_router.message(F.text == "Начать новый диалог")
-async def clear1(message: types.Message):
-    context.contex = {}
-    await message.answer(text="История очищена")
-
 
 #Старт
 @user_router.message(CommandStart())
@@ -53,21 +48,11 @@ async def cmd_start(message: types.Message):
         reply_markup=first_button_kb, parse_mode='HTML')
 
 
-@user_router.message(F.text == "Меню")
+@user_router.message(F.text == "Меню" or F.text == "/menu")
 async def cmd_next(message: types.Message):
     await message.answer("Вот, что я умею ",
                          reply_markup=main_inlines_kb)
 
-@user_router.message(F.text == "/menu")
-async def cmd_next(message: types.Message):
-    await message.answer("Вот, что я умею ",
-                         reply_markup=main_inlines_kb)
-
-
-@user_router.message(F.text == "Вернуться в меню")
-async def cmd_next(message: types.Message):
-    await message.answer("Вот, что я знаю о Екатеринбурге ",
-                         reply_markup=main_inlines_kb)
 
 
 
@@ -83,7 +68,6 @@ async def cmd_zanatie(callback: types.CallbackQuery):
 @user_router.callback_query(F.data == "tags")
 async def cmd_zanatie(callback: types.CallbackQuery):
     await callback.message.answer("Вот, что у меня есть в этом разделе:")
-
 
 @user_router.callback_query(F.data == "tag")
 async def cmd_zanatie(callback: types.CallbackQuery):
@@ -106,7 +90,6 @@ async def cmd_search_movie(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(Work.wait)
 
 
-
 @user_router.callback_query(F.data == "add_tag")
 async def cmd_search_movie(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Какой фильм Вас интересует? ")
@@ -114,9 +97,10 @@ async def cmd_search_movie(callback: types.CallbackQuery, state: FSMContext):
 
 
 
+
 @user_router.callback_query(F.data == "rec1")
 async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContext):
-    kek = await callback.message.answer("Сейчас порекомендую фильмы, которые могут вам понравиться", reply_markup=lol_button_kb)
+    kek = await callback.message.answer("Сейчас порекомендую фильмы, которые могут вам понравиться", reply_markup=main_inlines_kb)
     timer_message = await callback.message.answer("⏳")
 
     # Извлекаем предпочтения пользователя (если они есть)
@@ -153,7 +137,6 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
                                   reply_markup=main_inlines_kb, parse_mode='HTML')
 
 
-
 @user_router.callback_query(F.data == "rec2")
 async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -166,7 +149,7 @@ async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
 
 @user_router.callback_query(F.data == "rec3")
 async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContext):
-    kek = await callback.message.answer("Подождите немного...", reply_markup=lol_button_kb)
+    kek = await callback.message.answer("Подождите немного...", reply_markup=main_inlines_kb)
     timer_message = await callback.message.answer("⏳")
 
     await state.update_data(q=" ")
@@ -184,14 +167,14 @@ def description(query):
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT title, genre, year, about, rating, embedding_str1 FROM movies")
+    cursor.execute("SELECT title, rating, country, genre, year, duration, director, actors, tags, about, embedding_str1 FROM movies")
     rows = cursor.fetchall()
     conn.close()
 
     query_embedding = semantic_model.encode(query)
     results = []
 
-    for title, genre, year, about, rating, emb_str in rows:
+    for title, rating, country, genre, year, duration, director, actors, tags, about, emb_str in rows:
         try:
             movie_embedding = np.array(json.loads(emb_str))
         except Exception:
@@ -201,39 +184,42 @@ def description(query):
 
         similarity = np.dot(query_embedding, movie_embedding) / (norm_q * norm_m) if norm_q and norm_m else 0
 
-        results.append((title, genre, year, about, rating, similarity))
+        results.append((title, rating, country, genre, year, duration, director, actors, tags, about, similarity))
 
-    results.sort(key=lambda x: x[5], reverse=True)
-    return [(title, genre, year, about, rating) for title, genre, year, about, rating, _ in results[:3]]
-
+    results.sort(key=lambda x: x[10], reverse=True)
+    return [(title, rating, country, genre, year, duration, director, actors, tags, about) for title, rating, country, genre, year, duration, director, actors, tags, about, _ in results[:3]]
 
 
 def tag(query):
     """
-    Выполняет семантический поиск фильмов.
-    """
+        Выполняет семантический поиск фильмов.
+        """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT title, genre, year, about, rating, embedding_str2 FROM movies")
+    cursor.execute(
+        "SELECT title, rating, country, genre, year, duration, director, actors, tags, about, embedding_str2 FROM movies")
     rows = cursor.fetchall()
     conn.close()
 
     query_embedding = semantic_model.encode(query)
     results = []
 
-    for title, genre, year, about, rating, emb_str in rows:
+    for title, rating, country, genre, year, duration, director, actors, tags, about, emb_str in rows:
         try:
             movie_embedding = np.array(json.loads(emb_str))
         except Exception:
             continue
         norm_q = np.linalg.norm(query_embedding)
         norm_m = np.linalg.norm(movie_embedding)
-        similarity = np.dot(query_embedding, movie_embedding) / (norm_q * norm_m) if norm_q and norm_m else 0
-        if similarity > 0.3:
-            results.append((title, genre, year, about, rating, similarity))
 
-    results.sort(key=lambda x: x[3], reverse=True)
-    return [(title, genre, year, about, rating) for title, genre, year, about, rating, _ in results[:3]]
+        similarity = np.dot(query_embedding, movie_embedding) / (norm_q * norm_m) if norm_q and norm_m else 0
+
+        results.append((title, rating, country, genre, year, duration, director, actors, tags, about, similarity))
+
+    results.sort(key=lambda x: x[10], reverse=True)
+    return [(title, rating, country, genre, year, duration, director, actors, tags, about) for
+            title, rating, country, genre, year, duration, director, actors, tags, about, _ in results[:3]]
+
 
 
 
@@ -248,30 +234,29 @@ async def process_movie(message: types.Message, state: FSMContext):
         return
 
     # Фильм 1
-    title1, genre1, year1, about1, rating1 = results[0]
+    title1, rating1, country1, genre1, year1, duration1, director1, actors1, tags1, about1 = results[0]
     response1 = f"🎬 <b>{title1}</b>\n⭐ {rating1}\n📌 {genre1}\n📖 {about1}"
     keyboard1 = InlineKeyboardBuilder()
     keyboard1.button(text="➕ В рекомендации", callback_data="ar1")
     keyboard1.button(text="✅ Просмотрено", callback_data=f"w1")
     keyboard1.button(text="⭐ Оценить", callback_data="rate1")
+    keyboard1.button(text="📽️ Подробнее о фильме", callback_data="info1")
     keyboard1.adjust(1)
     await message.answer(response1, parse_mode="HTML", reply_markup=keyboard1.as_markup())
 
     @user_router.callback_query(F.data == "ar1")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
+    async def cmd_start_ai(state: FSMContext):
         data = await state.get_data()
         if "q" not in data:
             await state.update_data(q="")
 
         data = await state.get_data()
-        q = data.get("q", "") + ", " + genre1
+        q = data.get("q", "") + ", " + tags1
         await state.update_data(q=q)
-        await callback.message.answer(
+        await message.answer(
             "<i>Изменения успешно сохранены</i>",
-            reply_markup=main_inlines_kb,
             parse_mode='HTML'
         )
-
 
     @user_router.callback_query(F.data.startswith("rate1"))
     async def rate_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -280,7 +265,7 @@ async def process_movie(message: types.Message, state: FSMContext):
         await state.set_state(Work.mark)
 
     @user_router.callback_query(F.data == "w1")
-    async def mark_as_watched(callback: types.CallbackQuery, state: FSMContext):
+    async def mark_as_watched(callback: types.CallbackQuery):
         title = title1
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -292,28 +277,33 @@ async def process_movie(message: types.Message, state: FSMContext):
 
         await callback.message.answer(f"Фильм '{title}' помечен как просмотренный!")
 
+    @user_router.callback_query(F.data == "info1")
+    async def cmd_start_ai():
+        response1 = f"🎬 <b>{title1}</b>\n⭐ {rating1}\n\n📌 {genre1}, {country1}, {year1} год\n\nℹ️ {duration1}\n\n🧑‍ {director1}\n🎭 {actors1}\n\n📖 {about1}"
+        await message.answer(response1, parse_mode="HTML")
+
     # Фильм 2
-    title2, genre2, year2, about2, rating2 = results[1]
+    title2, rating2, country2, genre2, year2, duration2, director2, actors2, tags2, about2 = results[1]
     response2 = f"🎬 <b>{title2}</b>\n⭐ {rating2}\n📌 {genre2}\n📖 {about2}"
     keyboard2 = InlineKeyboardBuilder()
     keyboard2.button(text="➕ В рекомендации", callback_data=f"ar2")
     keyboard2.button(text="✅ Просмотрено", callback_data=f"w2")
     keyboard2.button(text="⭐ Оценить", callback_data=f"rate2")
+    keyboard2.button(text="📽️ Подробнее о фильме", callback_data="info2")
     keyboard2.adjust(1)
     await message.answer(response2, parse_mode="HTML", reply_markup=keyboard2.as_markup())
 
     @user_router.callback_query(F.data == "ar2")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
+    async def cmd_start_ai(state: FSMContext):
         data = await state.get_data()
         if "q" not in data:
             await state.update_data(q="")
 
         data = await state.get_data()
-        q = data.get("q", "") + ", " + genre2
+        q = data.get("q", "") + ", " + tags2
         await state.update_data(q=q)
-        await callback.message.answer(
+        await message.answer(
             "<i>Изменения успешно сохранены</i>",
-            reply_markup=main_inlines_kb,
             parse_mode='HTML'
         )
 
@@ -324,7 +314,7 @@ async def process_movie(message: types.Message, state: FSMContext):
         await state.set_state(Work.mark)
 
     @user_router.callback_query(F.data == "w2")
-    async def mark_as_watched(callback: types.CallbackQuery, state: FSMContext):
+    async def mark_as_watched():
         title = title2
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -334,30 +324,35 @@ async def process_movie(message: types.Message, state: FSMContext):
         conn.commit()
         conn.close()
 
-        await callback.message.answer(f"Фильм '{title}' помечен как просмотренный!")
+        await message.answer(f"Фильм '{title}' помечен как просмотренный!")
+
+    @user_router.callback_query(F.data == "info2")
+    async def cmd_start_ai():
+        response2 = f"🎬 <b>{title2}</b>\n⭐ {rating2}\n\n📌 {genre2}, {country2}, {year2} год\n\nℹ️ {duration2}\n\n🧑‍ {director2}\n🎭 {actors2}\n\n📖 {about2}"
+        await message.answer(response2, parse_mode="HTML")
 
     # Фильм 3
-    title3, genre3, year3, about3, rating3 = results[2]
+    title3, rating3, country3, genre3, year3, duration3, director3, actors3, tags3, about3 = results[2]
     response3 = f"🎬 <b>{title3}</b>\n⭐ {rating3}\n📌 {genre3}\n📖 {about3}"
     keyboard3 = InlineKeyboardBuilder()
     keyboard3.button(text="➕ В рекомендации", callback_data=f"ar3")
     keyboard3.button(text="✅ Просмотрено", callback_data=f"w3")
     keyboard3.button(text="⭐ Оценить", callback_data=f"rate3")
+    keyboard3.button(text="📽️ Подробнее о фильме", callback_data="info3")
     keyboard3.adjust(1)
     await message.answer(response3, parse_mode="HTML", reply_markup=keyboard3.as_markup())
 
     @user_router.callback_query(F.data == "ar3")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
+    async def cmd_start_ai(state: FSMContext):
         data = await state.get_data()
         if "q" not in data:
             await state.update_data(q="")
 
         data = await state.get_data()
-        q = data.get("q", "") + ", " + genre3
+        q = data.get("q", "") + ", " + tags3
         await state.update_data(q=q)
-        await callback.message.answer(
+        await message.answer(
             "<i>Изменения успешно сохранены</i>",
-            reply_markup=main_inlines_kb,
             parse_mode='HTML'
         )
 
@@ -368,7 +363,7 @@ async def process_movie(message: types.Message, state: FSMContext):
         await state.set_state(Work.mark)
 
     @user_router.callback_query(F.data == "w3")
-    async def mark_as_watched(callback: types.CallbackQuery, state: FSMContext):
+    async def mark_as_watched():
         title = title3
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -378,7 +373,12 @@ async def process_movie(message: types.Message, state: FSMContext):
         conn.commit()
         conn.close()
 
-        await callback.message.answer(f"Фильм '{title}' помечен как просмотренный!")
+        await message.answer(f"Фильм '{title}' помечен как просмотренный!")
+
+    @user_router.callback_query(F.data == "info3")
+    async def cmd_start_ai():
+        response3 = f"🎬 <b>{title3}</b>\n⭐ {rating3}\n\n📌 {genre3}, {country3}, {year3} год\n\nℹ️ {duration3}\n\n🧑‍ {director3}\n🎭 {actors3}\n\n📖 {about3}"
+        await message.answer(response3, parse_mode="HTML")
 
     await state.clear()
 
@@ -424,6 +424,7 @@ async def cmd_ai_process(message: types.Message, state: FSMContext):
         parse_mode='HTML'
     )
     await set_processing(state, False)
+
 
 
 
