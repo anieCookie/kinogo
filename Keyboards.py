@@ -17,16 +17,15 @@ main_inlines_kb = InlineKeyboardMarkup(inline_keyboard=[
 
 
 tags = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="Выбрать из библиотеки 📚", callback_data="lib")],
+    #[InlineKeyboardButton(text="Выбрать из библиотеки 📚", callback_data="lib")],
     [InlineKeyboardButton(text="Задать собственный тег 👨‍💻", callback_data="add_tag")]
 ])
 
 
-lib = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="Жанры ", callback_data="genre")],
-    [InlineKeyboardButton(text="Теги ", callback_data="tags")]
-    ])
-
+# lib = InlineKeyboardMarkup(inline_keyboard=[
+#     [InlineKeyboardButton(text="Жанры ", callback_data="genre")],
+#     [InlineKeyboardButton(text="Теги ", callback_data="tags")]
+#     ])
 
 
 recommend = InlineKeyboardMarkup(inline_keyboard=[
@@ -36,4 +35,8 @@ recommend = InlineKeyboardMarkup(inline_keyboard=[
 ])
 
 
+st = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="Список просмотренных 🍿", callback_data="pr")],
+    [InlineKeyboardButton(text="Список оценок ✍️", callback_data="oc")]
+])
 
