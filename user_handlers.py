@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 DB_PATH = "movies.db"
 USER_PATH = "user.db"
+REC_PATH = "rec.db"
 
 global user_id
 q = " "
@@ -42,7 +43,26 @@ def create_db():
 
     conn.commit()
     conn.close()
+
 create_db()
+
+def do_db():
+    conn = sqlite3.connect(REC_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+            CREATE TABLE IF NOT EXISTS recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                user_id TEXT NOT NULL, 
+                q TEXT NOT NULL, 
+                UNIQUE (user_id)
+            );
+            """)
+
+    conn.commit()
+    conn.close()
+
+do_db()
 
 
 async def set_processing(state: FSMContext, is_processing: bool):
@@ -80,8 +100,6 @@ async def cmd_search_movie(message: types.Message, state: FSMContext):
     await message.answer("Опишите фильм, который хотите найти ")
     await state.set_state(Work.wait)
 
-
-
 @user_router.callback_query(F.data == "recommend")
 async def cmd_o(callback: types.CallbackQuery):
     await callback.message.answer("Вот, что я могу вам предложить",
@@ -90,8 +108,6 @@ async def cmd_o(callback: types.CallbackQuery):
 @user_router.callback_query(F.data == "stat")
 async def cmd_o(callback: types.CallbackQuery):
     await callback.message.answer("Вот, что я могу вам показать", reply_markup=st)
-
-
 
 @user_router.callback_query(F.data == "pr")
 async def show_all_movies(callback: types.CallbackQuery):
@@ -148,7 +164,6 @@ async def cmd_o(callback: types.CallbackQuery):
     async def cmd_back(callback: types.CallbackQuery):
         await callback.bot.delete_message(chat_id=callback.from_user.id, message_id=sent_message.message_id)
 
-
 @user_router.callback_query(F.data == "movie")
 async def cmd_search_movie(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Опишите фильм, который хотите найти ")
@@ -159,26 +174,26 @@ async def cmd_search_movie(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Напишите теги, по которым вы хотите найти фильм")
     await state.set_state(Work.wait)
 
-
-
 @user_router.callback_query(F.data == "rec1")
-async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContext):
+async def show_recommendations(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
 
-    data = await state.get_data()
-    user_query = data.get("q", "").strip()
+    conn = sqlite3.connect(REC_PATH)
+    cursor = conn.cursor()
 
-    if not user_query:
-        await callback.message.answer("У вас пока нет сохранённых предпочтений. Воспользуйтесь функцией «Задать рекомендации ✍️»",
-                                      reply_markup=first_button_kb)
+    cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+
+    conn.close()
+
+    if not (result and result[0].strip()):
+        await callback.message.answer(
+            "У вас пока нет сохранённых предпочтений. Воспользуйтесь функцией «Задать рекомендации ✍️»",
+            reply_markup=first_button_kb
+        )
         return
 
-    results = description(user_query)
-
-    if not results or len(results) < 3:
-        await callback.message.answer("Фильмы не найдены")
-        await state.clear()
-        return
-
+    results = description(result)
     # Фильм 1
     title1, rating1, country1, genre1, year1, duration1, director1, actors1, tags1, about1 = results[0]
     response1 = f"🎬 <b>{title1}</b>\n⭐ {rating1}\n📌 {genre1}\n📖 {about1}"
@@ -191,14 +206,25 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
     await callback.message.answer(response1, parse_mode="HTML", reply_markup=keyboard1.as_markup())
 
     @user_router.callback_query(F.data == "ar1")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        if "q" not in data:
-            await state.update_data(q="")
+    async def add_to_recommendations(callback: types.CallbackQuery, state: FSMContext):
+        user_id = callback.from_user.id
+        tags = tags1
 
-        data = await state.get_data()
-        q = data.get("q", "") + ", " + tags1
-        await state.update_data(q=q)
+        conn = sqlite3.connect(REC_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+        existing_entry = cursor.fetchone()
+
+        if existing_entry:
+            updated_rec = existing_entry[0] + ", " + tags
+            cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+        else:
+            cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, tags))
+
+        conn.commit()
+        conn.close()
+
         await callback.answer("Фильм добавлен в список рекомендаций")
 
     @user_router.callback_query(F.data.startswith("rate1"))
@@ -265,15 +291,27 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
     await callback.message.answer(response2, parse_mode="HTML", reply_markup=keyboard2.as_markup())
 
     @user_router.callback_query(F.data == "ar2")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        if "q" not in data:
-            await state.update_data(q="")
+    async def add_to_recommendations(callback: types.CallbackQuery, state: FSMContext):
+        user_id = callback.from_user.id
+        tags = tags2
 
-        data = await state.get_data()
-        q = data.get("q", "") + ", " + tags2
-        await state.update_data(q=q)
+        conn = sqlite3.connect(REC_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+        existing_entry = cursor.fetchone()
+
+        if existing_entry:
+            updated_rec = existing_entry[0] + ", " + tags
+            cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+        else:
+            cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, tags))
+
+        conn.commit()
+        conn.close()
+
         await callback.answer("Фильм добавлен в список рекомендаций")
+
 
     @user_router.callback_query(F.data.startswith("rate2"))
     async def rate_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -339,14 +377,25 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
     await callback.message.answer(response3, parse_mode="HTML", reply_markup=keyboard3.as_markup())
 
     @user_router.callback_query(F.data == "ar3")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        if "q" not in data:
-            await state.update_data(q="")
+    async def add_to_recommendations(callback: types.CallbackQuery, state: FSMContext):
+        user_id = callback.from_user.id
+        tags = tags3
 
-        data = await state.get_data()
-        q = data.get("q", "") + ", " + tags3
-        await state.update_data(q=q)
+        conn = sqlite3.connect(REC_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+        existing_entry = cursor.fetchone()
+
+        if existing_entry:
+            updated_rec = existing_entry[0] + ", " + tags
+            cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+        else:
+            cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, tags))
+
+        conn.commit()
+        conn.close()
+
         await callback.answer("Фильм добавлен в список рекомендаций")
 
     @user_router.callback_query(F.data.startswith("rate3"))
@@ -409,18 +458,31 @@ async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContex
 
 @user_router.callback_query(F.data == "rec2")
 async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if "q" not in data:  # Проверяем, есть ли уже переменная q
-        await state.update_data(q="")  # Создаём q, если её нет
-
     await callback.message.answer("Какие фильмы вам нравятся?")
     await state.set_state(Work.process)
 
+
 @user_router.callback_query(F.data == "rec3")
-async def cmd_start_eda_callback(callback: types.CallbackQuery, state: FSMContext):
-    await state.update_data(q=" ")
-    await callback.answer("Рекомендации успешно сброшены",
-                                  reply_markup=first_button_kb)
+async def reset_recommendations(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+
+    conn = sqlite3.connect(REC_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+    existing_entry = cursor.fetchone()
+
+    if existing_entry:
+
+        cursor.execute("UPDATE recommendations SET q = '' WHERE user_id = ?", (user_id,))
+    else:
+        cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, '')", (user_id,))
+
+    conn.commit()
+    conn.close()
+
+    await callback.answer("Рекомендации успешно сброшены")
+
 
 
 
@@ -507,14 +569,25 @@ async def process_movie(message: types.Message, state: FSMContext):
     await message.answer(response1, parse_mode="HTML", reply_markup=keyboard1.as_markup())
 
     @user_router.callback_query(F.data == "ar1")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        if "q" not in data:
-            await state.update_data(q="")
+    async def add_to_recommendations(callback: types.CallbackQuery, state: FSMContext):
+        user_id = callback.from_user.id
+        tags = tags1
 
-        data = await state.get_data()
-        q = data.get("q", "") + ", " + tags2
-        await state.update_data(q=q)
+        conn = sqlite3.connect(REC_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+        existing_entry = cursor.fetchone()
+
+        if existing_entry:
+            updated_rec = existing_entry[0] + ", " + tags
+            cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+        else:
+            cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, tags))
+
+        conn.commit()
+        conn.close()
+
         await callback.answer("Фильм добавлен в список рекомендаций")
 
     @user_router.callback_query(F.data.startswith("rate1"))
@@ -583,15 +656,27 @@ async def process_movie(message: types.Message, state: FSMContext):
     await message.answer(response2, parse_mode="HTML", reply_markup=keyboard2.as_markup())
 
     @user_router.callback_query(F.data == "ar2")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        if "q" not in data:
-            await state.update_data(q="")
+    async def add_to_recommendations(callback: types.CallbackQuery, state: FSMContext):
+        user_id = callback.from_user.id
+        tags = tags2
 
-        data = await state.get_data()
-        q = data.get("q", "") + ", " + tags2
-        await state.update_data(q=q)
+        conn = sqlite3.connect(REC_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+        existing_entry = cursor.fetchone()
+
+        if existing_entry:
+            updated_rec = existing_entry[0] + ", " + tags
+            cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+        else:
+            cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, tags))
+
+        conn.commit()
+        conn.close()
+
         await callback.answer("Фильм добавлен в список рекомендаций")
+
 
     @user_router.callback_query(F.data.startswith("rate2"))
     async def rate_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -658,15 +743,27 @@ async def process_movie(message: types.Message, state: FSMContext):
     await message.answer(response3, parse_mode="HTML", reply_markup=keyboard3.as_markup())
 
     @user_router.callback_query(F.data == "ar3")
-    async def cmd_start_ai(callback: types.CallbackQuery, state: FSMContext):
-        data = await state.get_data()
-        if "q" not in data:
-            await state.update_data(q="")
+    async def add_to_recommendations(callback: types.CallbackQuery, state: FSMContext):
+        user_id = callback.from_user.id
+        tags = tags3
 
-        data = await state.get_data()
-        q = data.get("q", "") + ", " + tags3
-        await state.update_data(q=q)
+        conn = sqlite3.connect(REC_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+        existing_entry = cursor.fetchone()
+
+        if existing_entry:
+            updated_rec = existing_entry[0] + ", " + tags
+            cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+        else:
+            cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, tags))
+
+        conn.commit()
+        conn.close()
+
         await callback.answer("Фильм добавлен в список рекомендаций")
+
 
     @user_router.callback_query(F.data.startswith("rate3"))
     async def rate_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -746,15 +843,12 @@ async def save_rating(message: types.Message, state: FSMContext):
         conn = sqlite3.connect(USER_PATH)
         cursor = conn.cursor()
 
-        # Проверяем, есть ли уже такая запись в БД
         cursor.execute("SELECT * FROM user_movies WHERE user_id = ? AND title = ?", (user_id, title))
         existing_entry = cursor.fetchone()
 
         if existing_entry:
-            # Если запись есть, обновляем только оценку (mark)
             cursor.execute("UPDATE user_movies SET mark = ? WHERE user_id = ? AND title = ? AND rating = ? AND genre = ?", (rating0, user_id, title, rating, genre))
         else:
-            # Если записи нет, создаем новую строку (ставим watched = 1)
             cursor.execute("INSERT INTO user_movies (user_id, title, watched, mark, rating, genre) VALUES (?, ?, 1, ?, ?, ?)",
                            (user_id, title, rating0, rating, genre))
 
@@ -779,17 +873,32 @@ async def save_rating(message: types.Message, state: FSMContext):
 
 @user_router.message(Work.process)
 async def cmd_ai_process(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
     user_text = message.text.strip() if message.text else ""
 
     if not user_text:
         await message.answer("Пожалуйста, введите текст")
         return
 
-    data = await state.get_data()
-    q = data.get("q", "") + ", " + user_text
-    await state.update_data(q=q)
-    await message.answer("Изменения успешно сохранены",reply_markup=first_button_kb)
-    await set_processing(state, False)
+    conn = sqlite3.connect(REC_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT q FROM recommendations WHERE user_id = ?", (user_id,))
+    existing_entry = cursor.fetchone()
+
+    if existing_entry:
+        # Если запись есть, обновляем поле rec, добавляя новый текст
+        updated_rec = existing_entry[0] + ", " + user_text
+        cursor.execute("UPDATE recommendations SET q = ? WHERE user_id = ?", (updated_rec, user_id))
+    else:
+        # Если записи нет, создаем новую
+        cursor.execute("INSERT INTO recommendations (user_id, q) VALUES (?, ?)", (user_id, user_text))
+
+    conn.commit()
+    conn.close()
+
+    await message.answer("Изменения успешно сохранены", reply_markup=first_button_kb)
+    await state.clear()  # Очищаем состояние
 
 
 
